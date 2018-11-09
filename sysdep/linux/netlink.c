@@ -1369,21 +1369,30 @@ krt_replace_rte(struct krt_proto *p, net *n, rte *new, rte *old, struct ea_list 
   int err = 0;
 
   /*
-   * We could use NL_OP_REPLACE, but route replace on Linux has some problems:
+   * NL_OP_REPLACE limitations in Linux:
    *
    * 1) Does not check for matching rtm_protocol
    * 2) Has broken semantics for IPv6 ECMP
    * 3) Crashes some kernel version when used for IPv6 ECMP
    *
-   * So we use NL_OP_DELETE and then NL_OP_ADD. We also do not trust the old
-   * route value, so we do not try to optimize IPv6 ECMP reconfigurations.
+   * In this implemenation it's used only for IPv4 routes.
+   * For IPv6 routes NL_OP_DELETE and then NL_OP_ADD operations are used. 
+   * We also do not trust the old route value, 
+   * so we do not try to optimize IPv6 ECMP reconfigurations.
    */
 
-  if (old)
-    nl_delete_rte(p, old, eattrs);
+  if (!krt_ecmp6(p) && new) {
+    // use NL_OP_REPLACE for IPv4 routes
+    rta *a = new->attrs;
+    err = nl_send_route(p, new, eattrs, NL_OP_REPLACE, a->dest, &(a->nh));
+  } else {
+    // for IPv6 use NL_OP_DELETE and then NL_OP_ADD
+    if (old)
+      nl_delete_rte(p, old, eattrs);
 
-  if (new)
-    err = nl_add_rte(p, new, eattrs);
+    if (new)
+      err = nl_add_rte(p, new, eattrs);
+  }
 
   if (err < 0)
     n->n.flags |= KRF_SYNC_ERROR;
